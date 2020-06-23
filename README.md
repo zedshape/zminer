@@ -69,11 +69,3 @@ As they are built-in libraries in pure Python distribution, **Z-Miner** can be e
 > `sys`: to recieve arguments from console  
 > `numpy`: to make normal distributions with received parameters
 
-### Plots
-In our jupyter-notebook files, we use following libraries to plot images. These are **not** related to the algorithm **Z-Miner** and generator **Z-Generator**. If you want to run the code in the notebook, you may need all libraries mentioned below. If you just want to check the plots, you can just open the jupyter-notebook file as we already run all the codes and printed results in the notebook.
-> `pickle`: to load and save experiment results in a shape of Python dictionary  
-> `numpy`: to manipulate the shape of results from **Z-Miner** suitable to matplotlib  
-> `pandas`: to manipulate the shape of results  from **Z-Miner** suitable to matplotlib  
-> `matplotlib`: to plot and save the experiment results
-
-
