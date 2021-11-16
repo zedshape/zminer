@@ -1,7 +1,9 @@
-import sys
 import csv
-from utils import *
+import sys
 from time import process_time
+
+from utils import *
+
 
 # ZMiner
 # We did not use any external library for the fare comparison
@@ -32,8 +34,7 @@ class ZMiner:
             for event in seq.sequences:
                 if (
                     event.label in self.database.initialSupport
-                    and self.database.initialSupport[event.label]
-                    >= self.constraints["minSup"]
+                    and self.database.initialSupport[event.label] >= self.constraints["minSup"]
                 ):
                     prunedSequences.append(event)
             seq.sequences = prunedSequences
@@ -135,7 +136,7 @@ class ZMiner:
             # We no longer explicitly save separate data structure, but separate them by indices
             # for time and memory efficiency
 
-            #z = (tuple(eE), tuple(lE), intervals[-1], fft, ch)
+            # z = (tuple(eE), tuple(lE), intervals[-1], fft, ch)
 
             z = (intervals, min(s1.end, s2.end, s3.end))
 
@@ -171,7 +172,7 @@ class ZMiner:
         """
 
         fft = min(sk.end, z[1])
-        znew = (z[0]+(sk,), fft)
+        znew = (z[0] + (sk,), fft)
         return znew
 
     def extendZ(self, z, ek, Rnew, Si, Rprev, Ak, k):
@@ -181,32 +182,32 @@ class ZMiner:
         foundRelation = None
 
         # Trivial, just "follow"
-        #firstNewRelat = Rprev + "b" * len(z[0])
+        # firstNewRelat = Rprev + "b" * len(z[0])
 
         for sk in candidates:
-            #z[-1] is always the value of z.EarliestEndTime conceptually
+            # z[-1] is always the value of z.EarliestEndTime conceptually
             if sk.start - z[-1] >= self.constraints["gap"]:
                 continue
 
             # initialize current relation set with previously defined follows
 
-            #This is an implementation of earlier intervals
-            #This string contain indices of earlierIntervals
-            Rprevrst = Rprev[-(k-2):]
+            # This is an implementation of earlier intervals
+            # This string contain indices of earlierIntervals
+            Rprevrst = Rprev[-(k - 2) :]
             Rk = []
 
-            #indice set
+            # indice set
             for idx, si in enumerate(z[0][:-1]):
-                #print(len(z[0][:-1]), k, idx)
+                # print(len(z[0][:-1]), k, idx)
                 foundRelation = False
                 # We have some overlapped events to be checked. We check it with frequentRelations
                 if (si.label, sk.label) not in self.FL[2]:
                     break
 
-                #This is an implementation of earlier intervals
-                #indices of earlier intervals are marked as 'b', so that we can just skip it
-                if Rprevrst[idx] == 'b':
-                    Rk.append('b') # automatic follow for current relation set
+                # This is an implementation of earlier intervals
+                # indices of earlier intervals are marked as 'b', so that we can just skip it
+                if Rprevrst[idx] == "b":
+                    Rk.append("b")  # automatic follow for current relation set
                     foundRelation = True
                     # if we find one, we do not need more iteration for this pair
                     continue
@@ -214,13 +215,9 @@ class ZMiner:
                 for Rcand in self.FL[2][(si.label, sk.label)]:
                     # laterevent and new event
                     self.comparisoncount += 1
-                    relatArr = self.getZTableSecondTable(
-                        (si.label, sk.label), Rcand, Si, si
-                    )
+                    relatArr = self.getZTableSecondTable((si.label, sk.label), Rcand, Si, si)
 
-                    if (
-                        relatArr != False and sk in relatArr
-                    ):  # hash operation in -> O(1)
+                    if relatArr != False and sk in relatArr:  # hash operation in -> O(1)
                         Rk.append(Rcand)
                         foundRelation = True
                         # if we find one, we do not need more iteration for this pair
@@ -242,7 +239,7 @@ class ZMiner:
 
             Ak[Rk][Si].append(znew)
 
-    #growZ function is affected by mode D
+    # growZ function is affected by mode D
     def growZ(self, Eprev, Rprev, k):
         if self.timeout < process_time():
             return

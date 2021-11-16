@@ -1,6 +1,7 @@
 # DEPENDENCY: NUMPY
-import numpy as np
 import sys
+
+import numpy as np
 
 
 def ZGenerator(meanE, sigE, meanI, sigI, meanH, sigH, meanL, sigL, vLen):
@@ -40,16 +41,7 @@ def ZGenerator(meanE, sigE, meanI, sigI, meanH, sigH, meanL, sigL, vLen):
                 while starttime < 0:
                     starttime = np.random.choice(hLen - size, 1)[0]
 
-            database += (
-                str(i)
-                + " "
-                + str(event)
-                + " "
-                + str(starttime)
-                + " "
-                + str(starttime + size)
-                + "\n"
-            )
+            database += str(i) + " " + str(event) + " " + str(starttime) + " " + str(starttime + size) + "\n"
     return database
 
 

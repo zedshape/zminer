@@ -9,83 +9,27 @@ import sys
 # o = overlaps
 # m = meets
 # b = follows
-possibletypes = {
-    "e",
-    "s",
-    "f",
-    "c",
-    "o",
-    "m",
-    "b",
-}
+
 R = {"e", "s", "f", "c", "o", "m", "b"}
 
-# Transitivity table used to test KarmaLegoD
-trans_table = {
-    "e": {
-        "e": ["e"],
-        "s": ["s"],
-        "f": ["f"],
-        "c": ["c"],
-        "o": ["o"],
-        "m": ["m"],
-        "b": ["b"],
-    },
-    "s": {
-        "e": ["s"],
-        "s": ["s"],
-        "f": ["b", "m", "o"],
-        "c": ["b", "o", "m", "c", "f"],
-        "o": ["b", "o", "m"],
-        "m": ["b"],
-        "b": ["b"],
-    },
-    "f": {
-        "e": ["f"],
-        "s": ["o"],
-        "f": ["f"],
-        "c": ["c"],
-        "o": ["o"],
-        "m": ["m"],
-        "b": ["b"],
-    },
-    "c": {
-        "e": ["c"],
-        "s": ["c", "f", "o"],
-        "f": ["c"],
-        "c": ["c"],
-        "o": ["o", "c", "f"],
-        "m": ["o", "c", "f"],
-        "b": ["b", "o", "m", "c", "f"],
-    },
-    "o": {
-        "e": ["o"],
-        "s": ["o"],
-        "f": ["b", "o", "m"],
-        "c": ["b", "o", "m", "c", "f"],
-        "o": ["b", "o", "m"],
-        "m": ["b"],
-        "b": ["b"],
-    },
-    "m": {
-        "e": ["m"],
-        "s": ["m"],
-        "f": ["b"],
-        "c": ["b"],
-        "o": ["b"],
-        "m": ["b"],
-        "b": ["b"],
-    },
-    "b": {
-        "e": ["b"],
-        "s": ["b"],
-        "f": ["b"],
-        "c": ["b"],
-        "o": ["b"],
-        "m": ["b"],
-        "b": ["b"],
-    },
-}
+
+def createDatabase(data):
+    sequences = []
+    initialSupport = {}
+    # frequentSecondElements = set()
+
+    for id, eSeqList in enumerate(data):
+        newSeq = EventSequence(id)
+        eventList = newSeq.processAdding(eSeqList)
+        sequences.append(newSeq)
+
+        # Numba does not support dictionary structure so we need something else!
+        # Add initial support
+        for label in eventList:
+            if label not in initialSupport:
+                initialSupport[label] = 0
+            initialSupport[label] += 1
+
 
 # Database is a collection of e-sequences
 class Database:
@@ -141,8 +85,47 @@ class EventSequence:
         return "(" + ", ".join(rst) + ")"
 
 
+def createEventSequence(row):
+    """
+    A function to convert each row from the input to an event sequence
+
+    ...
+
+    Attributes
+    ----------
+    row : list
+        a row of the database
+
+    Returns
+    -------
+    eseq : list
+        a converted
+    uniqueEvents : set
+        a set of unique event labels
+    """
+
+
 # Interval is a triplet composed of stat time, end time, and label
 # it will follow lexicographical rule
+# need to make sure that the label is numeric to use numba
+def createInterval(label, start, end):
+    return (label, start, end)
+
+
+def getDuration(interval):
+    return interval[2] - interval[1]
+
+
+def compareIntervals(one, two):
+    if one.start == two.start:
+        if one.end == two.end:
+            return one.label < two.label
+        else:
+            return one.end < two.end
+    else:
+        return one.start < two.start
+
+
 class Interval:
     def __init__(self, label, start, end):
         self.label = label
@@ -242,7 +225,7 @@ def makeConstraints(argv, database):
     constraints["timeoutseconds"] = int(argv[3]) if (len(argv) > 3) else 10000
     if constraints["timeoutseconds"] == -1:
         constraints["timeoutseconds"] = float("inf")
-    #newly added! level constraints
+    # newly added! level constraints
     constraints["level"] = float(argv[4]) if (len(argv) > 4) else float("inf")
     if constraints["level"] == -1:
         constraints["level"] = float("inf")
@@ -276,19 +259,38 @@ def exportDisprop(dataname, FL1, FL2, n1, n2, constraints):
         for E in FL1[k]:
             for R in FL1[k][E]:
                 if E not in FL2[k] or R not in FL2[k][E]:
-                    F.append({"events": E, "relations": R, "freq1": len(FL1[k][E][R]), "freq2": 0,
-                    "relSup1": len(FL1[k][E][R])/n1, "relSup2": 0,
-                    "disprop": ((len(FL1[k][E][R])+1)/n1)/(1/n2)})
+                    F.append(
+                        {
+                            "events": E,
+                            "relations": R,
+                            "freq1": len(FL1[k][E][R]),
+                            "freq2": 0,
+                            "relSup1": len(FL1[k][E][R]) / n1,
+                            "relSup2": 0,
+                            "disprop": ((len(FL1[k][E][R]) + 1) / n1) / (1 / n2),
+                        }
+                    )
                 else:
-                    F.append({"events": E, "relations": R, "freq1": len(FL1[k][E][R]), "freq2": len(FL2[k][E][R]),
-                    "relSup1": len(FL1[k][E][R])/n1, "relSup2": len(FL2[k][E][R])/n2,
-                    "disprop": ((len(FL1[k][E][R])+1)/n1)/((len(FL2[k][E][R])+1)/n2)})
+                    F.append(
+                        {
+                            "events": E,
+                            "relations": R,
+                            "freq1": len(FL1[k][E][R]),
+                            "freq2": len(FL2[k][E][R]),
+                            "relSup1": len(FL1[k][E][R]) / n1,
+                            "relSup2": len(FL2[k][E][R]) / n2,
+                            "disprop": ((len(FL1[k][E][R]) + 1) / n1) / ((len(FL2[k][E][R]) + 1) / n2),
+                        }
+                    )
 
     with open(filename, "w") as output_file:
-        dict_writer = csv.DictWriter(output_file, ["events", "relations", "freq1", "freq2", "relSup1", "relSup2", "disprop"])
+        dict_writer = csv.DictWriter(
+            output_file, ["events", "relations", "freq1", "freq2", "relSup1", "relSup2", "disprop"]
+        )
         dict_writer.writeheader()
         dict_writer.writerows(F)
     return filename
+
 
 # export F structure to csv file
 def exportF(dataname, FL, constraints):
@@ -372,9 +374,7 @@ def exportL(dataname, FL, constraints):
                             )
 
     with open(filename, "w") as output_file:
-        dict_writer = csv.DictWriter(
-            output_file, ["events", "relations", "frequency", "e-sequence", "intervals"]
-        )
+        dict_writer = csv.DictWriter(output_file, ["events", "relations", "frequency", "e-sequence", "intervals"])
         dict_writer.writeheader()
         dict_writer.writerows(L)
     return filename
