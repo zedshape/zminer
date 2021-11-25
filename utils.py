@@ -1,380 +1,194 @@
 import csv
-import sys
+from numba import njit, typed
+import numpy as np
+from typing import Any, Tuple, List
 
-# Here we follow Allen's original abbreviation form
-# e = matches
-# s = left-matches
-# f = right-matches
-# c = contains
-# o = overlaps
-# m = meets
-# b = follows
+#### PARAMETERS FOR CONSTRAINTS
+MINSUPPERCENT = 0
+MINSUP = 1
+EPSILON = 2
+GAP = 3
+TIMEOUTSECONDS = 4
+LEVEL = 5
+PRINTF = 6
+PRINTL = 7
+FORGETTABLE = 8
 
-R = {"e", "s", "f", "c", "o", "m", "b"}
+#### PARAMETERS FOR RELATIONS
+EQUALS = 0
+LEFTMATCHES = 1
+RIGHTMATCHES = 2
+CONTAINS = 3
+OVERLAPS = 4
+MEETS = 5
+FOLLOWS = 6
 
+R = {EQUALS, LEFTMATCHES, RIGHTMATCHES, CONTAINS, OVERLAPS, MEETS, FOLLOWS}
 
-def createDatabase(data):
-    sequences = []
-    initialSupport = {}
-    # frequentSecondElements = set()
+# PART 1: BASIC LOAD AND PREPROCESSING
+#
+# load_file, preprocess
+#
 
-    for id, eSeqList in enumerate(data):
-        newSeq = EventSequence(id)
-        eventList = newSeq.processAdding(eSeqList)
-        sequences.append(newSeq)
+def load_file(filename: str) -> np.ndarray:
+    with open(filename, "r") as f:
+        reader = csv.reader(f, delimiter =' ')
+        database = np.array(list(reader), dtype=np.int32)
+    return database
 
-        # Numba does not support dictionary structure so we need something else!
-        # Add initial support
-        for label in eventList:
-            if label not in initialSupport:
-                initialSupport[label] = 0
-            initialSupport[label] += 1
-
-
-# Database is a collection of e-sequences
-class Database:
-    def __init__(self, database):
-        self.sequences = []
-        self.initialSupport = {}
-        self.frequentSecondElements = set()
-
-        for id, eSeqList in enumerate(database):
-            newSeq = EventSequence(id)
-            eventList = newSeq.processAdding(eSeqList)
-            self.sequences.append(newSeq)
-
-            # Add initial support
-            for label in eventList:
-                if label not in self.initialSupport:
-                    self.initialSupport[label] = 0
-                self.initialSupport[label] += 1
-
-    def remove(self):
-        for idx, seq in enumerate(self.sequences):
-            for iidx, evt in enumerate(seq.sequences):
-                if evt.label not in self.initialSupport.keys():
-                    del self.sequences[idx].sequences[iidx]
-
-    # print function
-    def __str__(self):
-        rst = []
-        for i, eSeq in enumerate(self.sequences):
-            rst.append(format("eSeq %d : %s" % (i, eSeq.__str__())))
-        return "\n".join(rst)
-
-
-# Event-interval sequence (e-sequence)
-class EventSequence:
-    # init function will receive list-parsed sequence and change it into our own structure
-    def __init__(self, id):
-        self.id = id
-        self.sequences = []  # order of event
-
-    def processAdding(self, eSeqList):
-        eventList = set()
-        for event in eSeqList:
-            newInterval = Interval(event[0], event[1], event[2])
-            self.sequences.append(newInterval)
-            eventList.add(newInterval.label)
-        return eventList
-
-    def __repr__(self):
-        rst = []
-        for event in self.sequences:
-            rst.append(event.__str__())
-        return "(" + ", ".join(rst) + ")"
-
-
-def createEventSequence(row):
+@njit
+def preprocess(database: np.ndarray) -> Tuple[int, int, int, float, float, List[Any], List[Any], List[Any]]:
     """
-    A function to convert each row from the input to an event sequence
+    Function for preprocessing data into the shape that the algorithm takes
 
-    ...
+    :param database: a loaded event interval sequence database
 
-    Attributes
-    ----------
-    row : list
-        a row of the database
-
-    Returns
-    -------
-    eseq : list
-        a converted
-    uniqueEvents : set
-        a set of unique event labels
+    :return tseq: size of the database
+    :retuen tdis: number of unique event labels
+    :return tintv: total number of intervals in the database
+    :return aintv: average number of intervals per e-sequence
+    :return avgtime: average timespan (temporal length of e-sequence)
+    :return eseqdb: a processed event sequence database
+    :return unique_labels: unique event labels per e-sequence
+    :return initial_support: initial support of each event label
     """
 
+    eseq_size = database[:, 0].max() + 1
+    distinct_events = np.unique(database[:, 1])
 
-# Interval is a triplet composed of stat time, end time, and label
-# it will follow lexicographical rule
-# need to make sure that the label is numeric to use numba
-def createInterval(label, start, end):
-    return (label, start, end)
+    # Each e-sequence has different size so it cannot be numpy array
+    eseqdb = typed.List()
+
+    for i in range(eseq_size):
+        eseq = typed.List()
+        for row in database[database[:, 0] == i]:
+            eseq.append((row[1], row[2], row[3]))
+        eseqdb.append(eseq)
+    #eseqdb = [[(row[1], row[2], row[3]) for row in database[database[:, 0] == i]] for i in range(eseq_size)]
+
+    unique_labels = typed.List()
+
+    for eseq in eseqdb:
+        eseq_label = typed.List()
+        for interval in eseq:
+            eseq_label.append(interval[0])
+        unique_labels.append(set(eseq_label))
+    #unique_labels = [set([interval[0] for interval in eseq]) for eseq in eseqdb]
+    timelength = [np.max(database[database[:, 0] == i][:, -1]) for i in range(eseq_size)]
+    timelength = np.array(timelength)
+    
+    tseq = len(eseqdb)
+    tdis = len(distinct_events)
+    tintv = len(database)
+    aintv = len(database) / len(np.unique(database[:, 0]))
+    avgtime = timelength.sum() / len(timelength)
+
+    # From 0 to np.max() + 1
+    initial_support = np.zeros(np.max(database[:, 1]) + 1)
+
+    for eseq in unique_labels:
+        for label in eseq:
+            #if label not in initialSupport:
+            #    initialSupport[label] = 0
+            initial_support[label] += 1
+
+    return tseq, tdis, tintv, aintv, avgtime, eseqdb, unique_labels, initial_support
 
 
-def getDuration(interval):
+# PART 2: INTERVAL HANDLING
+#
+@njit
+def get_interval_duration(interval: Tuple[int, int, int]) -> int:
+    # (event label, start time, end time)
     return interval[2] - interval[1]
 
-
-def compareIntervals(one, two):
-    if one.start == two.start:
-        if one.end == two.end:
-            return one.label < two.label
-        else:
-            return one.end < two.end
-    else:
-        return one.start < two.start
-
-
-class Interval:
-    def __init__(self, label, start, end):
-        self.label = label
-        self.start = start
-        self.end = end
-
-    # get the whole duration of each event
-    def getDuration(self):
-        return self.end - self.start
-
+@njit
+def hash_interval(interval: Tuple[int, int, int]) -> int:
     # for python-supported hash function (for set operations)
-    def __hash__(self):
-        return hash((self.label, self.start, self.end))
+    return hash((interval[0], interval[1], interval[2]))
 
-    def __repr__(self):
-        return format("(%s, %d, %d)" % (self.label, self.start, self.end))
-
-    # built-in comparing function (for ordering)
+@njit
+def compare_intervals(one, two) -> bool:
     # our ordering is based on start -> end -> label
-    def __lt__(self, other):
-        if self.start == other.start:
-            if self.end == other.end:
-                return self.label < other.label
-            else:
-                return self.end < other.end
+    if one[1] == two[1]:
+        if one[2] == two[2]:
+            return one[0] < two[0]
         else:
-            return self.start < other.start
+            return one[2] < two[2]
+    else:
+        return one[1] < two[1]
 
-
+@njit
 def getRelation(A, B, constraints):
-    relation = None
+    relation = ""
 
-    epsilon = constraints["epsilon"]
-    gap = constraints["gap"]
+    epsilon = constraints[EPSILON]
+    gap = constraints[GAP]
 
-    if abs(B.start - A.start) <= epsilon:
-        if abs(B.end - A.end) <= epsilon:
-            relation = "e"
-        elif B.end - A.end > epsilon:
-            relation = "s"
-    elif abs(B.end - A.end) <= epsilon and B.start - A.start > epsilon:
-        relation = "f"
-    elif B.start - A.start > epsilon and A.end - B.end > epsilon:
-        relation = "c"
-    elif A.end - B.start > epsilon and B.start - A.start > epsilon:
-        relation = "o"
-    elif abs(B.start - A.end) <= epsilon:
-        relation = "m"
-    elif B.start - A.end > epsilon and (gap == 0 or B.start - A.end < gap):
-        relation = "b"
+    if abs(B[1] - A[1]) <= epsilon:
+        if abs(B[2] - A[2]) <= epsilon:
+            relation = EQUALS
+        elif B[2] - A[2] > epsilon:
+            relation = LEFTMATCHES
+    elif abs(B[2] - A[2]) <= epsilon and B[1] - A[1] > epsilon:
+        relation = RIGHTMATCHES
+    elif B[1] - A[1] > epsilon and A[2] - B[2] > epsilon:
+        relation = CONTAINS
+    elif A[2] - B[1] > epsilon and B[1] - A[1] > epsilon:
+        relation = OVERLAPS
+    elif abs(B[1] - A[2]) <= epsilon:
+        relation = MEETS
+    elif B[1] - A[2] > epsilon and (gap == 0 or B[1] - A[2] < gap):
+        relation = FOLLOWS
 
     return relation
 
+@njit
+def remove_intervals_from_database(eseqdb, initial_support, min_seq):
+    """
+    This function removes all the intervals in the database that do not satisfy mininum support requirement.
 
-# function for preprocessing data into the shape that the algorithm takes
-def preprocess(filename):
-    with open(filename, "r") as f:
-        reader = csv.reader(f)
-        your_list = list(reader)
-
-    distinct_events = set()
-    new_list = []
-    final_list = []
-    timelength = {}
-    max_index = 0
-    for i in your_list:
-        new_list.append(i[0].split(" "))
-
-    for i in new_list:
-        max_index = max(int(i[0]), max_index)
-
-    for i in range(max_index + 1):
-        final_list.append([])
-
-    for i in new_list:
-        final_list[int(i[0])].append((str(i[1]), int(i[2]), int(i[3])))
-        distinct_events.add(str(i[1]))
-        if int(i[0]) not in timelength:
-            timelength[int(i[0])] = 0
-        timelength[int(i[0])] = max(timelength[int(i[0])], int(i[3]))
-
-    tseq = len(final_list)
-    tdis = len(distinct_events)
-    tintv = len(new_list)
-    aintv = len(new_list) / len(final_list)
-    avgtime = sum(timelength.values()) / len(timelength.keys())
-
-    return tseq, tdis, tintv, aintv, avgtime, final_list
+    :param eseqdb: event sequence database
+    :return eseqdb: event sequence database without intervals not meeting the requirement.
+    """
+    eseqdb_new = typed.List()
+    for eseq in eseqdb:
+        eseq_new = typed.List()
+        for interval in eseq:
+            if initial_support[interval[0]] >= min_seq:
+                eseq_new.append(interval)
+        eseqdb_new.append(eseq_new)
+    
+    #eseqdb_new = [[interval for interval in List(eseq) if initial_support[interval[0]] >= min_seq] for eseq in List(eseqdb)]
+    return eseqdb_new
 
 
-def makeConstraints(argv, database):
-    constraints = {}
-    constraints["minSupPercent"] = float(argv[0]) if (len(argv) > 0) else 0
-    constraints["minSup"] = constraints["minSupPercent"] * len(database)
-    constraints["epsilon"] = float(argv[1]) if (len(argv) > 1) else 0
-    constraints["gap"] = float(argv[2]) if (len(argv) > 2) else float("inf")
-    constraints["timeoutseconds"] = int(argv[3]) if (len(argv) > 3) else 10000
-    if constraints["timeoutseconds"] == -1:
-        constraints["timeoutseconds"] = float("inf")
-    # newly added! level constraints
-    constraints["level"] = float(argv[4]) if (len(argv) > 4) else float("inf")
-    if constraints["level"] == -1:
-        constraints["level"] = float("inf")
-    constraints["printF"] = True if ((len(argv) > 5) and argv[5] == "True") else False
-    constraints["printL"] = True if ((len(argv) > 6) and argv[6] == "True") else False
+#PART 3: Export, Import, Parameter settings
+
+@njit
+def make_constraints(argv, database):
+    """
+    
+    0 - minSupPercent
+    1 - minSup
+    2 - epsilon
+    3 - gap
+    4 - timeoutseconds
+    """
+    constraints = np.zeros(8)
+    constraints[MINSUPPERCENT] = float(argv[MINSUPPERCENT]) if (len(argv) > 0) else 0
+    constraints[MINSUP] = constraints[MINSUPPERCENT] * len(database)
+    constraints[EPSILON] = float(argv[1]) if (len(argv) > 1) else 0
+    constraints[GAP] = float(argv[2]) if (len(argv) > 2) else np.inf
+    if constraints[GAP] == -1:
+        constraints[GAP] = np.inf
+    constraints[TIMEOUTSECONDS] = int(argv[3]) if (len(argv) > 3) else 10000
+    if constraints[TIMEOUTSECONDS] == -1:
+        constraints[TIMEOUTSECONDS] = np.inf
+    constraints[LEVEL] = float(argv[4]) if (len(argv) > 4) else np.inf
+    if constraints[LEVEL] == -1:
+        constraints[LEVEL] = np.inf
+    constraints[PRINTF] = True if ((len(argv) > 5) and argv[5] == True) else False
+    constraints[PRINTL] = True if ((len(argv) > 6) and argv[6] == True) else False
+    constraints[FORGETTABLE] = True if ((len(argv) > 7) and argv[7] == True) else False
     return constraints
-
-
-def getEventIntervalSequences(z):
-    return z[0]
-
-
-# export F structure to csv file
-def exportDisprop(dataname, FL1, FL2, n1, n2, constraints):
-    filename = (
-        "Disprop"
-        + "_"
-        + dataname
-        + "_"
-        + str(constraints["minSupPercent"])
-        + "_"
-        + str(constraints["epsilon"])
-        + "_"
-        + str(constraints["gap"])
-        + "_"
-        + str(constraints["timeoutseconds"])
-        + ".csv"
-    )
-    F = []
-    for k in FL1:
-        for E in FL1[k]:
-            for R in FL1[k][E]:
-                if E not in FL2[k] or R not in FL2[k][E]:
-                    F.append(
-                        {
-                            "events": E,
-                            "relations": R,
-                            "freq1": len(FL1[k][E][R]),
-                            "freq2": 0,
-                            "relSup1": len(FL1[k][E][R]) / n1,
-                            "relSup2": 0,
-                            "disprop": ((len(FL1[k][E][R]) + 1) / n1) / (1 / n2),
-                        }
-                    )
-                else:
-                    F.append(
-                        {
-                            "events": E,
-                            "relations": R,
-                            "freq1": len(FL1[k][E][R]),
-                            "freq2": len(FL2[k][E][R]),
-                            "relSup1": len(FL1[k][E][R]) / n1,
-                            "relSup2": len(FL2[k][E][R]) / n2,
-                            "disprop": ((len(FL1[k][E][R]) + 1) / n1) / ((len(FL2[k][E][R]) + 1) / n2),
-                        }
-                    )
-
-    with open(filename, "w") as output_file:
-        dict_writer = csv.DictWriter(
-            output_file, ["events", "relations", "freq1", "freq2", "relSup1", "relSup2", "disprop"]
-        )
-        dict_writer.writeheader()
-        dict_writer.writerows(F)
-    return filename
-
-
-# export F structure to csv file
-def exportF(dataname, FL, constraints):
-    filename = (
-        "F"
-        + "_"
-        + dataname
-        + "_"
-        + str(constraints["minSupPercent"])
-        + "_"
-        + str(constraints["epsilon"])
-        + "_"
-        + str(constraints["gap"])
-        + "_"
-        + str(constraints["timeoutseconds"])
-        + ".csv"
-    )
-    F = []
-    for k in FL:
-        for E in FL[k]:
-            for R in FL[k][E]:
-                F.append({"events": E, "relations": R, "frequency": len(FL[k][E][R])})
-    with open(filename, "w") as output_file:
-        dict_writer = csv.DictWriter(output_file, ["events", "relations", "frequency"])
-        dict_writer.writeheader()
-        dict_writer.writerows(F)
-    return filename
-
-
-# export L structure to csv file
-def exportL(dataname, FL, constraints):
-    filename = (
-        "L"
-        + "_"
-        + dataname
-        + "_"
-        + str(constraints["minSupPercent"])
-        + "_"
-        + str(constraints["epsilon"])
-        + "_"
-        + str(constraints["gap"])
-        + "_"
-        + str(constraints["timeoutseconds"])
-        + ".csv"
-    )
-    L = []
-
-    for k in FL:
-        for E in FL[k]:
-            for R in FL[k][E]:
-                if k == 2:
-                    for S in FL[k][E][R]:
-                        for s1 in FL[k][E][R][S]:
-                            for s2 in FL[k][E][R][S][s1]:
-                                location = s1.__repr__() + ", " + s2.__repr__()
-                                L.append(
-                                    {
-                                        "events": E,
-                                        "relations": R,
-                                        "frequency": len(FL[k][E][R]),
-                                        "e-sequence": S,
-                                        "intervals": location,
-                                    }
-                                )
-                else:
-                    for S in FL[k][E][R]:
-                        for z in FL[k][E][R][S]:
-                            location = ""
-                            for si in getEventIntervalSequences(z):
-                                location += si.__repr__()
-                                location += ","
-                            location = location[:-1]
-                            L.append(
-                                {
-                                    "events": E,
-                                    "relations": R,
-                                    "frequency": len(FL[k][E][R]),
-                                    "e-sequence": S,
-                                    "intervals": location,
-                                }
-                            )
-
-    with open(filename, "w") as output_file:
-        dict_writer = csv.DictWriter(output_file, ["events", "relations", "frequency", "e-sequence", "intervals"])
-        dict_writer.writeheader()
-        dict_writer.writerows(L)
-    return filename
