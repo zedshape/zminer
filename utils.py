@@ -15,6 +15,7 @@ PRINTL = 7
 FORGETTABLE = 8
 
 #### PARAMETERS FOR RELATIONS
+NONE = -1
 EQUALS = 0
 LEFTMATCHES = 1
 RIGHTMATCHES = 2
@@ -33,7 +34,7 @@ R = {EQUALS, LEFTMATCHES, RIGHTMATCHES, CONTAINS, OVERLAPS, MEETS, FOLLOWS}
 def load_file(filename: str) -> np.ndarray:
     with open(filename, "r") as f:
         reader = csv.reader(f, delimiter =' ')
-        database = np.array(list(reader), dtype=np.int32)
+        database = np.array(list(reader), dtype=np.int64)
     return database
 
 @njit
@@ -120,7 +121,7 @@ def compare_intervals(one, two) -> bool:
 
 @njit
 def getRelation(A, B, constraints):
-    relation = ""
+    relation = NONE
 
     epsilon = constraints[EPSILON]
     gap = constraints[GAP]
@@ -151,16 +152,18 @@ def remove_intervals_from_database(eseqdb, initial_support, min_seq):
     :param eseqdb: event sequence database
     :return eseqdb: event sequence database without intervals not meeting the requirement.
     """
+    frequent_events = set()
     eseqdb_new = typed.List()
     for eseq in eseqdb:
         eseq_new = typed.List()
         for interval in eseq:
             if initial_support[interval[0]] >= min_seq:
                 eseq_new.append(interval)
+                frequent_events.add(interval[0])
         eseqdb_new.append(eseq_new)
     
     #eseqdb_new = [[interval for interval in List(eseq) if initial_support[interval[0]] >= min_seq] for eseq in List(eseqdb)]
-    return eseqdb_new
+    return eseqdb_new, frequent_events
 
 
 #PART 3: Export, Import, Parameter settings
@@ -175,7 +178,7 @@ def make_constraints(argv, database):
     3 - gap
     4 - timeoutseconds
     """
-    constraints = np.zeros(8)
+    constraints = np.zeros(9)
     constraints[MINSUPPERCENT] = float(argv[MINSUPPERCENT]) if (len(argv) > 0) else 0
     constraints[MINSUP] = constraints[MINSUPPERCENT] * len(database)
     constraints[EPSILON] = float(argv[1]) if (len(argv) > 1) else 0
